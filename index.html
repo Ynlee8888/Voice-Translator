@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827"><title>双向语音翻译</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif}
+main{max-width:700px;margin:auto;padding:18px 14px 35px}h1{font-size:23px;margin:0 0 4px}.sub{color:#6b7280;font-size:13px;margin-bottom:15px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:15px;margin:10px 0}.langs{display:grid;grid-template-columns:1fr 48px 1fr;gap:8px;align-items:end}
+label{display:block;color:#6b7280;font-size:12px;margin-bottom:6px}select{width:100%;padding:12px;border:1px solid #ddd;border-radius:12px;background:#fff;font-size:16px}
+.swap{height:46px;border:0;border-radius:12px;background:#e8edff;font-size:22px}.status{margin-top:10px;color:#6b7280;font-size:13px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;margin-right:7px}.on{background:#059669}.rec{background:#dc2626}
+.box{min-height:105px}.caption{font-size:12px;color:#6b7280;margin-bottom:8px}.text{font-size:21px;line-height:1.5;word-break:break-word}.placeholder{color:#9ca3af;font-size:15px}
+.controls{text-align:center}.mic{width:112px;height:112px;border:0;border-radius:50%;background:#2563eb;color:#fff;font-size:38px;touch-action:none}.mic.active{background:#dc2626}.hint{font-size:13px;color:#6b7280;margin-top:10px}.modes{display:flex;gap:8px;margin-bottom:10px}.modes button,.actions button{border:0;border-radius:10px;padding:10px 12px;background:#f3f4f6}.modes button{flex:1}.modes .sel{background:#dbeafe;color:#1d4ed8;font-weight:600}.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}.history{max-height:300px;overflow:auto}.item{border-top:1px solid #eee;padding:11px 0}.item:first-child{border-top:0}.meta{font-size:11px;color:#9ca3af}.orig{margin-top:4px}.tran{margin-top:4px;font-size:16px}.notice{font-size:12px;color:#6b7280;line-height:1.6}
+</style></head>
+<body><main>
+<h1>双向语音翻译</h1><div class="sub">华语 · English · ไทย</div>
+<section class="card"><div class="langs">
+<div><label>我说</label><select id="from"><option value="zh-CN">华语</option><option value="en-US">English</option><option value="th-TH">ไทย</option></select></div>
+<button class="swap" id="swap">⇄</button>
+<div><label>对方说</label><select id="to"><option value="en-US">English</option><option value="zh-CN">华语</option><option value="th-TH">ไทย</option></select></div>
+</div><div class="status"><span class="dot" id="dot"></span><span id="status">准备就绪</span></div></section>
+
+<section class="card box"><div class="caption">原话</div><div id="source" class="text placeholder">按住麦克风说话</div><div class="actions"><button id="copySource">复制</button></div></section>
+<section class="card box"><div class="caption">翻译</div><div id="result" class="text placeholder">翻译结果会显示在这里</div><div class="actions"><button id="speak" disabled>🔊 播放</button><button id="copyResult">复制</button></div></section>
+
+<section class="card controls"><div class="modes"><button id="hold" class="sel">按住说话</button><button id="tap">点击开始/停止</button></div>
+<button id="mic" class="mic">🎙️</button><div id="hint" class="hint">按住麦克风，说完松开</div></section>
+
+<section class="card"><b>最近对话</b><div id="history" class="history" style="margin-top:8px"></div></section>
+<section class="card notice">首次使用请允许麦克风权限。翻译需要网络。若 iPhone Safari 不支持语音识别，可点击键盘上的麦克风进行系统听写，再使用翻译；Chrome/Edge 对网页语音识别的支持通常更完整。</section>
+</main>
+<script>
+const $=x=>document.getElementById(x), from=$("from"),to=$("to"),mic=$("mic"),source=$("source"),result=$("result"),status=$("status"),dot=$("dot"),hist=$("history");
+let rec=null,recording=false,tap=false,finalText="",interim="",last="",items=JSON.parse(localStorage.btHistory||"[]");
+function setStatus(t,c=""){status.textContent=t;dot.className="dot "+c}
+function makeRec(){
+ const R=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!R){setStatus("此浏览器不提供网页语音识别");return false}
+ rec=new R();rec.lang=from.value;rec.continuous=true;rec.interimResults=true;
+ rec.onstart=()=>{recording=true;mic.classList.add("active");setStatus("正在聆听…","rec")}
+ rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){let t=e.results[i][0].transcript;e.results[i].isFinal?finalText+=t+" ":interim=t}source.textContent=(finalText+interim).trim()||"聆听中…";source.classList.remove("placeholder")}
+ rec.onerror=e=>{setStatus("语音识别："+e.error);stop(true)}
+ rec.onend=()=>{if(recording&&!tap){finish()}else if(recording&&tap){try{rec.start()}catch(e){}}}
+ return true
+}
+function start(){if(!rec&&!makeRec())return;finalText="";interim="";source.textContent="聆听中…";source.classList.remove("placeholder");rec.lang=from.value;try{rec.start()}catch(e){}}
+function stop(){if(rec)try{rec.stop()}catch(e){}}
+function finish(){recording=false;mic.classList.remove("active");let t=(finalText+interim).trim();if(!t){setStatus("没有识别到内容");return}translate(t)}
+async function translate(t){
+ setStatus("正在翻译…");let a=from.value==="zh-CN"?"zh-CN":from.value==="th-TH"?"th":"en",b=to.value==="zh-CN"?"zh-CN":to.value==="th-TH"?"th":"en";
+ if(a===b){show(t,t);return}
+ try{let u="https://api.mymemory.translated.net/get?q="+encodeURIComponent(t)+"&langpair="+a+"|"+b;let r=await fetch(u);let d=await r.json();let v=d.responseData&&d.responseData.translatedText;if(!v)throw 0;show(t,v)}catch(e){setStatus("翻译失败，请检查网络");result.textContent="暂时无法取得翻译结果";result.classList.add("placeholder")}
+}
+function show(o,t){last=t;result.textContent=t;result.classList.remove("placeholder");$("speak").disabled=false;setStatus("翻译完成","on");items.unshift({o,t,f:from.value,to:to.value,time:new Date().toLocaleTimeString()});items=items.slice(0,30);localStorage.btHistory=JSON.stringify(items);render();speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(t);u.lang=to.value;u.rate=1;speechSynthesis.speak(u)}
+function render(){hist.innerHTML=items.length?items.map((x,i)=>`<div class="item"><div class="meta">${x.f} → ${x.to} · ${x.time}</div><div class="orig">${esc(x.o)}</div><div class="tran">${esc(x.t)}</div><div class="actions"><button onclick="play(${i})">🔊 播放</button><button onclick="navigator.clipboard.writeText(items[${i}].t)">复制</button></div></div>`).join(""):'<div class="notice">暂无记录</div>'}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+window.play=i=>{let x=items[i],u=new SpeechSynthesisUtterance(x.t);u.lang=x.to;speechSynthesis.cancel();speechSynthesis.speak(u)}
+mic.onpointerdown=e=>{e.preventDefault();if(tap){recording?stop():start()}else start()}
+["pointerup","pointercancel","pointerleave"].forEach(x=>mic.addEventListener(x,()=>{if(!tap&&recording)stop()}))
+$("hold").onclick=()=>{tap=false;$("hold").classList.add("sel");$("tap").classList.remove("sel");$("hint").textContent="按住麦克风，说完松开"}
+$("tap").onclick=()=>{tap=true;$("tap").classList.add("sel");$("hold").classList.remove("sel");$("hint").textContent="点击开始，再点击停止"}
+$("swap").onclick=()=>{let x=from.value;from.value=to.value;to.value=x;rec=null;setStatus("语言已交换","on")}
+from.onchange=()=>{rec=null};$("speak").onclick=()=>{let u=new SpeechSynthesisUtterance(last);u.lang=to.value;speechSynthesis.speak(u)}
+$("copySource").onclick=()=>navigator.clipboard.writeText(source.textContent);$("copyResult").onclick=()=>navigator.clipboard.writeText(last);render()
+</script></body></html>
