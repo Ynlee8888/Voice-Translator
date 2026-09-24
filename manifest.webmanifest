@@ -1,0 +1,17 @@
+{
+  "name": "Voice Translator",
+  "short_name": "翻译",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#2563eb",
+  "description": "中文、English、ไทย双向语音翻译",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
