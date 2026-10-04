@@ -78,8 +78,8 @@ select{width:100%;border:0;background:transparent;font-size:17px;font-weight:650
 
 <section class="card">
   <div class="sectiontitle">原话</div>
-  <div id="original" class="text placeholder">点击麦克风开始说话</div>
-  <div class="actions"><button class="smallbtn" id="copyOriginal">复制</button></div>
+  <textarea id="original" class="text" placeholder="点击麦克风说话，或输入文字" style="width:100%;border:0;background:transparent;font:inherit;font-size:22px;resize:vertical"></textarea>
+  <div class="actions"><button class="smallbtn" id="copyOriginal">复制</button><button class="smallbtn" id="retryBtn">翻译原话</button></div>
 </section>
 
 <section class="card result">
@@ -105,88 +105,74 @@ select{width:100%;border:0;background:transparent;font-size:17px;font-weight:650
   <div id="historyList"><div class="notice">还没有翻译记录</div></div>
 </section>
 
-<div class="notice">需要网络连接。首次使用麦克风时，请允许浏览器访问麦克风。</div>
+<div class="notice">修复版 v2.1 · 需要网络连接。请允许麦克风权限；建议先用点击开始/停止模式。无录音时也可输入文字翻译。</div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
+
 const $=id=>document.getElementById(id);
 const from=$("from"),to=$("to"),original=$("original"),translation=$("translation"),mic=$("mic"),dot=$("dot"),statusEl=$("status"),hint=$("hint"),toast=$("toast"),playBtn=$("playBtn");
-let recognition=null,listening=false,mode="push",lastSpeech="",lastTranslation="";
-
-const langCode={ "zh-CN":"zh-CN","en-US":"en-US","th-TH":"th-TH" };
-const speechName={"zh-CN":"zh-CN","en-US":"en-US","th-TH":"th-TH"};
-
-function showToast(t){toast.textContent=t;toast.classList.add("show");clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.classList.remove("show"),2200)}
+let recognition=null,state="idle",mode="tap",lastTranslation="",lastTarget="",requestId=0,controller=null,session=0,recordTimer=null;
+function showToast(t){toast.textContent=t;toast.classList.add("show");clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.classList.remove("show"),3000)}
 function setStatus(t,on=false){statusEl.textContent=t;dot.classList.toggle("live",on)}
-function setText(el,text,placeholder=false){el.textContent=text;el.classList.toggle("placeholder",placeholder)}
-function otherLang(){return to.value}
-function swapLang(){const a=from.value;from.value=to.value;to.value=a;setStatus("已交换语言")}
-$("swap").onclick=swapLang;
-
-function setupRecognition(){
- const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SR){showToast("此浏览器不支持网页语音识别，请改用支持语音识别的浏览器");return null}
- const r=new SR(); r.lang=speechName[from.value]; r.continuous=false; r.interimResults=true; r.maxAlternatives=1;
- r.onstart=()=>{listening=true;mic.classList.add("listening");setStatus("正在听…",true);hint.textContent="正在听，请说话"}
- r.onresult=e=>{
-   let finalText="", interim="";
-   for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)finalText+=e.results[i][0].transcript;else interim+=e.results[i][0].transcript}
-   if(interim) setText(original,interim,false);
-   if(finalText){lastSpeech=finalText.trim();setText(original,lastSpeech,false);translate(lastSpeech)}
- }
- r.onerror=e=>{listening=false;mic.classList.remove("listening");setStatus(e.error==="not-allowed"?"麦克风权限被拒绝":"语音识别失败");if(e.error==="not-allowed")showToast("请在浏览器设置中允许麦克风")}
- r.onend=()=>{listening=false;mic.classList.remove("listening");if(statusEl.textContent==="正在听…")setStatus("准备就绪");hint.textContent=mode==="push"?"按住麦克风，说完松开":"点击麦克风开始，再点一次停止"}
- return r;
-}
-async function translate(text){
- setStatus("正在翻译…");
- setText(translation,"翻译中…",true);playBtn.disabled=true;
- const pair=from.value.split("-")[0]+"|"+to.value.split("-")[0];
- try{
-   const url="https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(pair);
-   const res=await fetch(url); const data=await res.json();
-   const out=data?.responseData?.translatedText;
-   if(!out)throw new Error();
-   lastTranslation=out;setText(translation,out,false);playBtn.disabled=false;setStatus("翻译完成");addHistory(text,out);
-   speak(out,to.value);
- }catch(e){setText(translation,"翻译服务暂时无法连接",true);setStatus("翻译失败，请检查网络");showToast("翻译服务暂时无法连接")}
-}
-function speak(text,lang){if(!("speechSynthesis" in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=lang;speechSynthesis.speak(u)}
-playBtn.onclick=()=>{if(lastTranslation)speak(lastTranslation,to.value)}
-$("copyOriginal").onclick=()=>copy(original.textContent,"原话已复制");
-$("copyTranslation").onclick=()=>copy(translation.textContent,"翻译已复制");
-async function copy(t,msg){if(!t||t.startsWith("点击")||t.startsWith("翻译结果")||t==="翻译中…")return;try{await navigator.clipboard.writeText(t);showToast(msg)}catch{showToast("复制失败")}}
-$("clearBtn").onclick=()=>{setText(original,"点击麦克风开始说话",true);setText(translation,"翻译结果会显示在这里",true);lastSpeech="";lastTranslation="";playBtn.disabled=true;setStatus("准备就绪")}
-
-function addHistory(a,b){
- const arr=JSON.parse(localStorage.getItem("vt_history")||"[]");arr.unshift({a,b,time:Date.now()});localStorage.setItem("vt_history",JSON.stringify(arr.slice(0,10)));renderHistory()
-}
-function renderHistory(){
- const arr=JSON.parse(localStorage.getItem("vt_history")||"[]");const box=$("historyList");
- if(!arr.length){box.innerHTML='<div class="notice">还没有翻译记录</div>';return}
- box.innerHTML=arr.map(x=>`<div class="item"><div class="a">${escapeHtml(x.a)}</div><div class="b">${escapeHtml(x.b)}</div></div>`).join("")
-}
-function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
-$("historyClear").onclick=()=>{localStorage.removeItem("vt_history");renderHistory()}
-
+function setText(el,t,p=false){if(el===original)el.value=t;else el.textContent=t;el.classList.toggle("placeholder",p)}
+function resetMic(){clearTimeout(recordTimer);state="idle";mic.classList.remove("listening");hint.textContent=mode==="push"?"按住麦克风，说完松开":"点击麦克风开始，再点一次停止"}
+function cancelRecording(){session++;const r=recognition;recognition=null;resetMic();try{r?.abort()}catch{}}
+function invalidate(){requestId++;controller?.abort();playBtn.disabled=true;lastTranslation="";window.speechSynthesis?.cancel()}
 function start(){
- if(listening){try{recognition?.stop()}catch{}return}
- recognition=setupRecognition(); if(!recognition)return; recognition.lang=from.value; try{recognition.start()}catch{}
+ if(state!=="idle")return;
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){setStatus("此浏览器无法录音，可输入文字后点击翻译原话");return}
+ invalidate();window.speechSynthesis?.cancel();
+ const token=++session,r=new SR(),src=from.value,dst=to.value;
+ recognition=r;state="starting";let parts=[],finished=false,error="",stopRequested=false;
+ setText(original,"");setText(translation,"翻译结果会显示在这里",true);setStatus("正在启动麦克风…");
+ r.lang=src;r.continuous=false;r.interimResults=true;r.maxAlternatives=1;
+ const done=()=>{if(token!==session||finished)return;finished=true;recognition=null;resetMic();const text=parts.join(" ").trim();if(error){setStatus(error);return}if(text){original.value=text;translate(text,src,dst)}else setStatus("没有识别到文字，请重试或输入文字")};
+ r.onstart=()=>{if(token!==session)return;state="listening";mic.classList.add("listening");setStatus("正在听…",true);hint.textContent="说完后点击停止";if(stopRequested)try{r.stop()}catch{}}
+ r.onresult=e=>{if(token!==session)return;for(let i=e.resultIndex;i<e.results.length;i++)parts[i]=e.results[i][0].transcript;original.value=parts.join(" ").trim()};
+ r.onerror=e=>{if(token!==session)return;error=({"not-allowed":"请在 Safari 网站设置中允许麦克风","audio-capture":"无法访问麦克风，请关闭其他录音应用","network":"语音识别网络出错，请重试","no-speech":"没有听到语音，请重试","aborted":"录音已取消"})[e.error]||"语音识别失败："+e.error;done()};
+ r.onend=done;
+ recordTimer=setTimeout(()=>{if(token!==session||finished)return;error="录音超时，请重试";try{r.abort()}catch{}done()},45000);
+ r._stop=()=>{if(finished)return;stopRequested=true;state="stopping";setStatus("正在结束录音…");try{r.stop()}catch{}clearTimeout(recordTimer);recordTimer=setTimeout(()=>{try{r.abort()}catch{}done()},2500)};
+ try{r.start()}catch(e){error="麦克风启动失败，请再试一次";done()}
 }
-function stop(){try{recognition?.stop()}catch{}}
-mic.addEventListener("click",()=>{if(mode==="tap"){listening?stop():start()}})
-mic.addEventListener("touchstart",e=>{if(mode==="push"){e.preventDefault();start()}},{passive:false});
-["touchend","touchcancel"].forEach(ev=>mic.addEventListener(ev,e=>{if(mode==="push"){e.preventDefault();stop()}},{passive:false}));
-mic.addEventListener("mousedown",e=>{if(mode==="push"){e.preventDefault();start()}});
-["mouseup","mouseleave"].forEach(ev=>mic.addEventListener(ev,e=>{if(mode==="push"){e.preventDefault();stop()}}));
-$("pushMode").onclick=()=>{mode="push";$("pushMode").classList.add("active");$("tapMode").classList.remove("active");hint.textContent="按住麦克风，说完松开"}
-$("tapMode").onclick=()=>{mode="tap";$("tapMode").classList.add("active");$("pushMode").classList.remove("active");hint.textContent="点击麦克风开始，再点一次停止"}
-from.onchange=()=>{if(recognition)recognition.lang=from.value;setStatus("已切换语言")}
-to.onchange=()=>setStatus("已切换语言")
-renderHistory();
+function stop(){if(state!=="idle")recognition?._stop?.()}
+async function translate(text,src=from.value,dst=to.value){
+ text=text.trim();if(!text){showToast("请先说话或输入文字");return}
+ controller?.abort();const id=++requestId,c=new AbortController();controller=c;setStatus("正在翻译…");setText(translation,"翻译中…",true);playBtn.disabled=true;lastTranslation="";
+ const timer=setTimeout(()=>c.abort(),15000);
+ try{
+ let out=text;
+ if(src!==dst){const codes={"zh-CN":"zh-CN","en-US":"en","th-TH":"th"};const url="https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(codes[src]+"|"+codes[dst]);const res=await fetch(url,{signal:c.signal});if(!res.ok)throw Error("翻译服务返回 "+res.status);const data=await res.json();if(Number(data.responseStatus)!==200)throw Error("翻译服务不可用或免费额度已用完");out=data.responseData?.translatedText;if(!out)throw Error("翻译服务未返回译文")}
+ if(id!==requestId)return;lastTranslation=out;lastTarget=dst;setText(translation,out);playBtn.disabled=false;setStatus("翻译完成；无声音请点击播放");addHistory(text,out);speak(out,dst);
+ }catch(e){if(id!==requestId)return;const message=e.name==="AbortError"?"翻译超时，请点击翻译原话重试":e.message||"翻译失败，请重试";setText(translation,message,true);setStatus(message)}finally{clearTimeout(timer)}
+}
+function speak(text,lang){if(!window.speechSynthesis){showToast("浏览器不支持朗读");return}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=lang;const voice=speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith(lang.split('-')[0].toLowerCase()));if(voice)u.voice=voice;u.onerror=()=>showToast("朗读未成功，请点击播放重试");speechSynthesis.speak(u)}
+playBtn.onclick=()=>{if(lastTranslation)speak(lastTranslation,lastTarget)};
+$("retryBtn").onclick=()=>{cancelRecording();translate(original.value)};
+async function copy(text){try{await navigator.clipboard.writeText(text);showToast("已复制")}catch{showToast("复制失败")}}
+$("copyOriginal").onclick=()=>copy(original.value);$("copyTranslation").onclick=()=>{if(lastTranslation)copy(lastTranslation)};
+$("clearBtn").onclick=()=>{cancelRecording();invalidate();original.value="";setText(translation,"翻译结果会显示在这里",true);setStatus("准备就绪")};
+function readHistory(){try{const a=JSON.parse(localStorage.getItem("vt_history")||"[]");return Array.isArray(a)?a:[]}catch{return[]}}
+function addHistory(a,b){try{const arr=readHistory();arr.unshift({a,b,time:Date.now()});localStorage.setItem("vt_history",JSON.stringify(arr.slice(0,10)));renderHistory()}catch{}}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function renderHistory(){const arr=readHistory();$("historyList").innerHTML=arr.length?arr.map(x=>`<div class="item"><div class="a">${escapeHtml(x.a)}</div><div class="b">${escapeHtml(x.b)}</div></div>`).join(""):'<div class="notice">还没有翻译记录</div>'}
+$("historyClear").onclick=()=>{try{localStorage.removeItem("vt_history")}catch{}renderHistory()};
+function changeLang(){cancelRecording();invalidate();setText(translation,"翻译结果会显示在这里",true);setStatus("语言已切换，请重新说话或翻译原话")}
+$("swap").onclick=()=>{const a=from.value;from.value=to.value;to.value=a;changeLang()};from.onchange=changeLang;to.onchange=changeLang;
+mic.style.touchAction="none";
+mic.addEventListener("click",()=>{if(mode==="tap")state==="idle"?start():stop()});
+mic.addEventListener("pointerdown",e=>{if(mode!=="push")return;e.preventDefault();mic.setPointerCapture?.(e.pointerId);start()});
+["pointerup","pointercancel","lostpointercapture"].forEach(ev=>mic.addEventListener(ev,()=>{if(mode==="push")stop()}));
+function setMode(m){cancelRecording();mode=m;$("pushMode").classList.toggle("active",m==="push");$("tapMode").classList.toggle("active",m==="tap");resetMic();setStatus("准备就绪")}
+$("pushMode").onclick=()=>setMode("push");$("tapMode").onclick=()=>setMode("tap");
+document.addEventListener("visibilitychange",()=>{if(document.hidden){cancelRecording();invalidate()}});
+setMode("tap");renderHistory();
+// Remove the previous cache so this repaired HTML can update on subsequent visits.
+if("serviceWorker" in navigator)navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.filter(r=>r.scope===new URL('./',location.href).href).map(r=>r.unregister()))).catch(()=>{});
 
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}
 </script>
 </body>
 </html>
