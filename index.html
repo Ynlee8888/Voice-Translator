@@ -31,7 +31,7 @@ select{width:100%;border:0;background:transparent;font-size:17px;font-weight:650
 .sectiontitle{font-size:12px;color:var(--muted);font-weight:650;margin-bottom:8px}
 .text{font-size:22px;line-height:1.42;min-height:72px;white-space:pre-wrap;word-break:break-word}
 .placeholder{color:#b4bcc9}
-.actions{display:flex;gap:8px;margin-top:10px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .smallbtn{border:0;background:#f3f5f8;color:var(--blue);border-radius:13px;padding:9px 13px;font-size:13px;font-weight:650}
 .smallbtn:disabled{color:#aab1bd}
 .result{background:linear-gradient(180deg,#f8fbff,#fff)}
@@ -59,18 +59,18 @@ select{width:100%;border:0;background:transparent;font-size:17px;font-weight:650
 <body>
 <div class="app">
 <header>
-  <div class="brand"><div class="logo">文</div><div><h1>Voice Translator</h1><div class="sub">双向语音翻译 · 中文 · English · ไทย</div></div></div>
+  <div class="brand"><div class="logo">文</div><div><h1>听说翻译</h1><div class="sub">七种语言互译 · 华语对照 · 语音播放</div></div></div>
   <button class="iconbtn" id="clearBtn" title="清除">⌫</button>
 </header>
 
 <section class="card">
   <div class="langrow">
     <div class="langbox"><label>我说</label><select id="from">
-      <option value="zh-CN">华语</option><option value="en-US">English</option><option value="th-TH">ไทย</option>
+      <option value="zh-CN">华语</option><option value="en-US">英语</option><option value="th-TH">泰语</option><option value="ja-JP">日语</option><option value="ko-KR">韩语</option><option value="ms-MY">马来语</option><option value="hi-IN">印地语（印度）</option>
     </select></div>
     <button class="swap" id="swap" aria-label="交换语言">⇄</button>
     <div class="langbox"><label>对方说</label><select id="to">
-      <option value="en-US">English</option><option value="zh-CN">华语</option><option value="th-TH">ไทย</option>
+      <option value="en-US">英语</option><option value="zh-CN">华语</option><option value="th-TH">泰语</option><option value="ja-JP">日语</option><option value="ko-KR">韩语</option><option value="ms-MY">马来语</option><option value="hi-IN">印地语（印度）</option>
     </select></div>
   </div>
   <div class="status"><span class="dot" id="dot"></span><span id="status">准备就绪</span></div>
@@ -85,6 +85,10 @@ select{width:100%;border:0;background:transparent;font-size:17px;font-weight:650
 <section class="card result">
   <div class="sectiontitle">翻译</div>
   <div id="translation" class="text placeholder">翻译结果会显示在这里</div>
+  <div id="chinesePanel" hidden style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+    <div id="chineseCaption" class="sectiontitle">华语对照</div>
+    <div id="chineseText" class="text" style="font-size:19px;min-height:0"></div>
+  </div>
   <div class="actions">
     <button class="smallbtn play" id="playBtn" disabled>🔊 播放</button>
     <button class="smallbtn" id="copyTranslation">复制</button>
@@ -107,7 +111,7 @@ select{width:100%;border:0;background:transparent;font-size:17px;font-weight:650
   <div id="historyList"><div class="notice">还没有翻译记录</div></div>
 </section>
 
-<div class="notice">修复版 v2.2 · 免费翻译结果可能有误，可点击“用 Google 翻译核对”。无声音时先点击“测试声音”，查看上方状态提示。需要网络连接。</div>
+<div class="notice">修复版 v2.4 · 外语译文附华语对照，播放所选目标语言。免费翻译结果可能有误，可点击“用 Google 翻译核对”。新增日语、韩语、马来语、印地语。朗读取决于手机可用语音；缺少对应语音时会提示。需要网络连接。</div>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -121,7 +125,8 @@ function setStatus(t,on=false){statusEl.textContent=t;dot.classList.toggle("live
 function setText(el,t,p=false){if(el===original)el.value=t;else el.textContent=t;el.classList.toggle("placeholder",p)}
 function resetMic(){clearTimeout(recordTimer);state="idle";mic.classList.remove("listening");hint.textContent=mode==="push"?"按住麦克风，说完松开":"点击麦克风开始，再点一次停止"}
 function cancelRecording(){session++;const r=recognition;recognition=null;resetMic();try{r?.abort()}catch{}}
-function invalidate(){requestId++;controller?.abort();playBtn.disabled=true;lastTranslation="";window.speechSynthesis?.cancel()}
+let chineseController=null;
+function invalidate(){requestId++;controller?.abort();chineseController?.abort();$("chinesePanel").hidden=true;$("chineseText").textContent="";playBtn.disabled=true;lastTranslation="";window.speechSynthesis?.cancel()}
 function start(){
  if(state!=="idle")return;
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -143,13 +148,23 @@ function start(){
 function stop(){if(state!=="idle")recognition?._stop?.()}
 async function translate(text,src=from.value,dst=to.value){
  text=text.trim();if(!text){showToast("请先说话或输入文字");return}
- controller?.abort();const id=++requestId,c=new AbortController();controller=c;setStatus("正在翻译…");setText(translation,"翻译中…",true);playBtn.disabled=true;lastTranslation="";
+ controller?.abort();chineseController?.abort();$("chinesePanel").hidden=true;const id=++requestId,c=new AbortController();controller=c;setStatus("正在翻译…");setText(translation,"翻译中…",true);playBtn.disabled=true;lastTranslation="";
  const timer=setTimeout(()=>c.abort(),15000);
  try{
  let out=text;
- if(src!==dst){const codes={"zh-CN":"zh-CN","en-US":"en","th-TH":"th"};const url="https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(codes[src]+"|"+codes[dst]);const res=await fetch(url,{signal:c.signal});if(!res.ok)throw Error("翻译服务返回 "+res.status);const data=await res.json();if(Number(data.responseStatus)!==200)throw Error("翻译服务不可用或免费额度已用完");out=chooseTranslation(data,text,src,dst);if(!out)throw Error("翻译服务未返回译文")}
- if(id!==requestId)return;lastTranslation=out;lastTarget=dst;setText(translation,out);playBtn.disabled=false;setStatus("翻译完成；无声音请点击播放");addHistory(text,out);speak(out,dst);
+ if(src!==dst){const codes={"zh-CN":"zh-CN","en-US":"en","th-TH":"th","ja-JP":"ja","ko-KR":"ko","ms-MY":"ms","hi-IN":"hi"};const url="https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(codes[src]+"|"+codes[dst]);const res=await fetch(url,{signal:c.signal});if(!res.ok)throw Error("翻译服务返回 "+res.status);const data=await res.json();if(Number(data.responseStatus)!==200)throw Error("翻译服务不可用或免费额度已用完");out=chooseTranslation(data,text,src,dst);if(!out)throw Error("翻译服务未返回译文")}
+ if(id!==requestId)return;lastTranslation=out;lastTarget=dst;setText(translation,out);playBtn.disabled=false;setStatus("翻译完成；无声音请点击播放");addHistory(text,out);showChinese(text,src,dst,out,id);speak(out,dst);
  }catch(e){if(id!==requestId)return;const message=e.name==="AbortError"?"翻译超时，请点击翻译原话重试":e.message||"翻译失败，请重试";setText(translation,message,true);setStatus(message)}finally{clearTimeout(timer)}
+}
+async function showChinese(text,src,dst,out,id){
+ if(dst==="zh-CN")return;
+ $("chinesePanel").hidden=false;
+ $("chineseCaption").textContent=src==="zh-CN"?"华语对照（原话）":"华语对照（原话的译文）";
+ if(src==="zh-CN"){$("chineseText").textContent=text;return}
+ $("chineseText").textContent="正在生成华语对照…";
+ const c=new AbortController();chineseController=c;const timer=setTimeout(()=>c.abort(),15000);
+ try{const code=src.split("-")[0];const res=await fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(code+"|zh-CN"),{signal:c.signal});if(!res.ok)throw Error();const data=await res.json();if(Number(data.responseStatus)!==200)throw Error();const chinese=chooseTranslation(data,text,src,"zh-CN");if(!chinese)throw Error();if(id===requestId)$("chineseText").textContent=chinese;
+ }catch{if(id===requestId)$("chineseText").textContent="华语对照暂时无法取得，请点击翻译原话重试"}finally{clearTimeout(timer)}
 }
 function chooseTranslation(data,text,src,dst){
  const normalize=s=>String(s||'').normalize('NFKC').trim().replace(/[\s?!。，！？]+$/g,'');
@@ -168,6 +183,7 @@ function speak(text,lang){
  const u=new SpeechSynthesisUtterance(text);activeUtterance=u;
  u.lang=lang;u.volume=1;u.rate=0.95;u.pitch=1;
  const voice=availableVoices.find(v=>v.lang.toLowerCase()===lang.toLowerCase())||availableVoices.find(v=>v.lang.toLowerCase().startsWith(lang.split('-')[0].toLowerCase()));if(voice)u.voice=voice;
+ if(availableVoices.length&&!voice){setStatus("手机未提供所选语言的朗读语音");showToast("手机未提供所选语言的朗读语音");activeUtterance=null;return}
  let started=false;
  setStatus("正在启动朗读…");
  u.onstart=()=>{if(token!==speechToken)return;started=true;clearTimeout(speechTimer);setStatus("正在播放（如听不到，请检查声音输出）",true)};
@@ -176,7 +192,7 @@ function speak(text,lang){
  try{synth.speak(u);synth.resume();speechTimer=setTimeout(()=>{if(token!==speechToken||started||activeUtterance!==u)return;setStatus("朗读未启动；请用 Safari 打开，并再次点击播放")},5000)}catch(e){setStatus("朗读启动失败："+e.message)}
 }
 $("soundTest").onclick=()=>speak("Hello. This is a voice test.","en-US");
-$("verifyTranslation").onclick=()=>{const text=original.value.trim();if(!text){showToast("请先输入原话");return}const codes={"zh-CN":"zh-CN","en-US":"en","th-TH":"th"};window.open("https://translate.google.com/?sl="+codes[from.value]+"&tl="+codes[to.value]+"&text="+encodeURIComponent(text)+"&op=translate","_blank","noopener,noreferrer")};
+$("verifyTranslation").onclick=()=>{const text=original.value.trim();if(!text){showToast("请先输入原话");return}const codes={"zh-CN":"zh-CN","en-US":"en","th-TH":"th","ja-JP":"ja","ko-KR":"ko","ms-MY":"ms","hi-IN":"hi"};window.open("https://translate.google.com/?sl="+codes[from.value]+"&tl="+codes[to.value]+"&text="+encodeURIComponent(text)+"&op=translate","_blank","noopener,noreferrer")};
 playBtn.onclick=()=>{if(lastTranslation)speak(lastTranslation,lastTarget)};
 $("retryBtn").onclick=()=>{cancelRecording();translate(original.value)};
 async function copy(text){try{await navigator.clipboard.writeText(text);showToast("已复制")}catch{showToast("复制失败")}}
